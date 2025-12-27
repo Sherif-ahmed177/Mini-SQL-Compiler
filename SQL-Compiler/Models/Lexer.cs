@@ -10,7 +10,7 @@ namespace SQL_Compiler.Models
 
     public class Lexer
     {
-        private readonly HashSet<string> _keywords = new()
+        private readonly HashSet<string> _keywords = new(StringComparer.OrdinalIgnoreCase)
         {
             "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES",
             "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "DROP",
@@ -19,7 +19,7 @@ namespace SQL_Compiler.Models
             "ASC", "DESC", "TRUE", "FALSE"
         };
 
-        private readonly HashSet<string> _types = new() { "INT", "FLOAT", "TEXT", "VARCHAR", "CHAR", "DATE", "DATETIME" };
+        private readonly HashSet<string> _types = new(StringComparer.OrdinalIgnoreCase) { "INT", "FLOAT", "TEXT", "VARCHAR", "CHAR", "DATE", "DATETIME", "BOOLEAN", "BIGINT" };
         private readonly HashSet<char> _delimiters = new() { '(', ')', ',', ';', '.' };
 
         public List<SqlToken> Analyze(string code)
@@ -47,19 +47,17 @@ namespace SQL_Compiler.Models
                     continue;
                 }
 
-                // Multi-line comment: ##...##
                 if (c == '#' && i + 1 < code.Length && code[i + 1] == '#')
                 {
                     int startLine = line, startCol = col;
-                    i += 2; col += 2; // Skip both ##
+                    i += 2; col += 2; 
                     bool closed = false;
                     while (i < code.Length)
                     {
-                        // Check for closing ##
                         if (code[i] == '#' && i + 1 < code.Length && code[i + 1] == '#')
                         {
                             closed = true;
-                            i += 2; col += 2; // Skip both ##
+                            i += 2; col += 2; 
                             break;
                         }
                         if (code[i] == '\n') { line++; col = 1; i++; continue; }

@@ -6,13 +6,19 @@ namespace SQL_Compiler.Models
     public class ParseTreeNode
     {
         public string Name { get; set; }
-        public string Lexeme { get; set; } // Optional: for leaf nodes
+        public string Lexeme { get; set; } 
+        public string? DataType { get; set; } 
+        public string? SymbolTableRef { get; set; } 
+        public int Line { get; set; } = 0;
+        public int Column { get; set; } = 0;
         public List<ParseTreeNode> Children { get; set; } = new List<ParseTreeNode>();
 
-        public ParseTreeNode(string name, string lexeme = "")
+        public ParseTreeNode(string name, string lexeme = "", int line = 0, int column = 0)
         {
             Name = name;
             Lexeme = lexeme;
+            Line = line;
+            Column = column;
         }
 
         public ParseTreeNode AddChild(ParseTreeNode node)
@@ -40,7 +46,6 @@ namespace SQL_Compiler.Models
         {
             if (_current >= _tokens.Count)
             {
-                // Return EOF with line/column from last token
                 var lastToken = _tokens.Count > 0 ? _tokens[_tokens.Count - 1] : null;
                 return new SqlToken
                 {
@@ -92,16 +97,14 @@ namespace SQL_Compiler.Models
         {
             if (Check(type)) return Advance();
 
-            // Error handling
             SyntaxError(message, Peek());
-            return new SqlToken { Type = "ERROR", Lexeme = "" }; // Return dummy to avoid crash, or throw
+            return new SqlToken { Type = "ERROR", Lexeme = "" }; 
         }
 
         private SqlToken _lastErrorToken;
 
         private void SyntaxError(string message, SqlToken token)
         {
-            // Suppress redundant errors at the same location (Panic Mode duplicate reduction)
             if (_lastErrorToken != null && 
                 _lastErrorToken.Line == token.Line && 
                 _lastErrorToken.Column == token.Column)
@@ -113,7 +116,6 @@ namespace SQL_Compiler.Models
             _errors.Add($"Syntax Error: {message} at line {token.Line}, column {token.Column}, found '{token.Lexeme}'");
         }
 
-        // Panic mode recovery
         private void Synchronize()
         {
             Advance();
@@ -162,7 +164,6 @@ namespace SQL_Compiler.Models
             if (Match("DELETE")) return ParseDeleteStmt();
             if (Match("CREATE")) return ParseCreateStmt();
 
-            // Only report if it's not EOF, otherwise we get weird errors at end of file logic sometimes
             if (!IsAtEnd())
             {
                 SyntaxError("Expected statement (SELECT, INSERT, UPDATE, DELETE, CREATE)", Peek());
@@ -171,28 +172,28 @@ namespace SQL_Compiler.Models
             return null;
         }
 
-        // Create Statement
         private ParseTreeNode ParseCreateStmt()
         {
             var createNode = new ParseTreeNode("CreateStmt");
-            createNode.AddChild(new ParseTreeNode("KEYWORD", "CREATE")); // Already matched
+            
+            createNode.AddChild(new ParseTreeNode("KEYWORD", "CREATE", Previous().Line, Previous().Column)); 
 
             Consume("TABLE", "Expected 'TABLE' after 'CREATE'");
-            createNode.AddChild(new ParseTreeNode("KEYWORD", "TABLE"));
+            createNode.AddChild(new ParseTreeNode("KEYWORD", "TABLE", Previous().Line, Previous().Column));
 
             var tableName = Consume("IDENTIFIER", "Expected table name");
-            createNode.AddChild(new ParseTreeNode("IDENTIFIER", tableName.Lexeme));
+            createNode.AddChild(new ParseTreeNode("IDENTIFIER", tableName.Lexeme, tableName.Line, tableName.Column));
 
             Consume("LEFT_PAREN", "Expected '(' after table name");
-            createNode.AddChild(new ParseTreeNode("DELIMITER", "("));
+            createNode.AddChild(new ParseTreeNode("DELIMITER", "(", Previous().Line, Previous().Column));
 
             createNode.AddChild(ParseFieldList());
 
             Consume("RIGHT_PAREN", "Expected ')' after field list");
-            createNode.AddChild(new ParseTreeNode("DELIMITER", ")"));
+            createNode.AddChild(new ParseTreeNode("DELIMITER", ")", Previous().Line, Previous().Column));
 
             Consume("SEMICOLON", "Expected ';' at end of statement");
-            createNode.AddChild(new ParseTreeNode("DELIMITER", ";"));
+            createNode.AddChild(new ParseTreeNode("DELIMITER", ";", Previous().Line, Previous().Column));
 
             return createNode;
         }
@@ -203,7 +204,7 @@ namespace SQL_Compiler.Models
             do
             {
                 listNode.AddChild(ParseFieldDef());
-            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",")) != null)); // Add comma node if matched
+            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",", Previous().Line, Previous().Column)) != null)); 
             return listNode;
         }
 
@@ -212,29 +213,25 @@ namespace SQL_Compiler.Models
             var fieldNode = new ParseTreeNode("FieldDef");
             
             var name = Consume("IDENTIFIER", "Expected column name");
-            fieldNode.AddChild(new ParseTreeNode("IDENTIFIER", name.Lexeme));
+            fieldNode.AddChild(new ParseTreeNode("IDENTIFIER", name.Lexeme, name.Line, name.Column));
 
             var type = Consume("TYPE", "Expected column type");
-            fieldNode.AddChild(new ParseTreeNode("TYPE", type.Lexeme));
+            fieldNode.AddChild(new ParseTreeNode("TYPE", type.Lexeme, type.Line, type.Column));
 
             if (Match("PRIMARY"))
             {
-                fieldNode.AddChild(new ParseTreeNode("KEYWORD", "PRIMARY"));
+                fieldNode.AddChild(new ParseTreeNode("KEYWORD", "PRIMARY", Previous().Line, Previous().Column));
                 Consume("KEY", "Expected 'KEY' after 'PRIMARY'");
-                fieldNode.AddChild(new ParseTreeNode("KEYWORD", "KEY"));
+                fieldNode.AddChild(new ParseTreeNode("KEYWORD", "KEY", Previous().Line, Previous().Column));
             }
 
             return fieldNode;
         }
 
-        // ==========================================
-        // EXPRESSION PARSING (Condition logic)
-        // ==========================================
-
         private ParseTreeNode ParseWhereClause()
         {
             var whereNode = new ParseTreeNode("WhereClause");
-            whereNode.AddChild(new ParseTreeNode("KEYWORD", "WHERE")); // Caller matched WHERE
+            whereNode.AddChild(new ParseTreeNode("KEYWORD", "WHERE", Previous().Line, Previous().Column)); 
             whereNode.AddChild(ParseCondition());
             return whereNode;
         }
@@ -250,9 +247,9 @@ namespace SQL_Compiler.Models
             
             while (Match("OR"))
             {
-                var orNode = new ParseTreeNode("Condition"); // OrExpression
+                var orNode = new ParseTreeNode("Condition"); 
                 orNode.AddChild(left);
-                orNode.AddChild(new ParseTreeNode("OPERATOR", "OR"));
+                orNode.AddChild(new ParseTreeNode("OPERATOR", "OR", Previous().Line, Previous().Column));
                 orNode.AddChild(ParseAndExpression());
                 left = orNode;
             }
@@ -265,9 +262,9 @@ namespace SQL_Compiler.Models
 
             while (Match("AND"))
             {
-                var andNode = new ParseTreeNode("Condition"); // AndExpression
+                var andNode = new ParseTreeNode("Condition"); 
                 andNode.AddChild(left);
-                andNode.AddChild(new ParseTreeNode("OPERATOR", "AND"));
+                andNode.AddChild(new ParseTreeNode("OPERATOR", "AND", Previous().Line, Previous().Column));
                 andNode.AddChild(ParseNotExpression());
                 left = andNode;
             }
@@ -279,7 +276,7 @@ namespace SQL_Compiler.Models
             if (Match("NOT"))
             {
                 var notNode = new ParseTreeNode("Condition");
-                notNode.AddChild(new ParseTreeNode("OPERATOR", "NOT"));
+                notNode.AddChild(new ParseTreeNode("OPERATOR", "NOT", Previous().Line, Previous().Column));
                 notNode.AddChild(ParseNotExpression());
                 return notNode;
             }
@@ -293,9 +290,9 @@ namespace SQL_Compiler.Models
             if (Match("EQUAL", "NOT_EQUAL", "LESS_THAN", "GREATER_THAN", "LESS_EQUAL", "GREATER_EQUAL", "LIKE"))
             {
                 var opToken = Previous();
-                var relNode = new ParseTreeNode("Condition"); // RelExpression
+                var relNode = new ParseTreeNode("Condition"); 
                 relNode.AddChild(left);
-                relNode.AddChild(new ParseTreeNode("OPERATOR", opToken.Lexeme));
+                relNode.AddChild(new ParseTreeNode("OPERATOR", opToken.Lexeme, opToken.Line, opToken.Column));
                 relNode.AddChild(ParseTerm());
                 return relNode;
             }
@@ -306,48 +303,46 @@ namespace SQL_Compiler.Models
         private ParseTreeNode ParseTerm()
         {
             if (Match("IDENTIFIER"))
-                return new ParseTreeNode("IDENTIFIER", Previous().Lexeme);
+                return new ParseTreeNode("IDENTIFIER", Previous().Lexeme, Previous().Line, Previous().Column);
             
             if (Match("NUMBER"))
-                return new ParseTreeNode("NUMBER", Previous().Lexeme);
+                return new ParseTreeNode("NUMBER", Previous().Lexeme, Previous().Line, Previous().Column);
             
             if (Match("STRING"))
-                return new ParseTreeNode("STRING", Previous().Lexeme);
+                return new ParseTreeNode("STRING", Previous().Lexeme, Previous().Line, Previous().Column);
 
             if (Match("NULL"))
-                return new ParseTreeNode("KEYWORD", "NULL");
+                return new ParseTreeNode("KEYWORD", "NULL", Previous().Line, Previous().Column);
 
             if (Match("TRUE"))
-                return new ParseTreeNode("BOOLEAN_LITERAL", "TRUE");
+                return new ParseTreeNode("BOOLEAN_LITERAL", "TRUE", Previous().Line, Previous().Column);
 
             if (Match("FALSE"))
-                return new ParseTreeNode("BOOLEAN_LITERAL", "FALSE");
+                return new ParseTreeNode("BOOLEAN_LITERAL", "FALSE", Previous().Line, Previous().Column);
 
             if (Match("LEFT_PAREN"))
             {
                 var expr = ParseCondition();
                 Consume("RIGHT_PAREN", "Expected ')' after expression");
-                return expr; // Or wrap in a ParenthesizedExpr node if desired, but flattening is fine for tree
+                return expr; 
             }
 
-            // Error
             SyntaxError("Expected expression (identifier, value, or parenthesis)", Peek());
             return new ParseTreeNode("ERROR", "Missing Term");
         }
 
-        // Helper for Select Statement
         private ParseTreeNode ParseSelectStmt()
         {
             var node = new ParseTreeNode("SelectStmt");
-            node.AddChild(new ParseTreeNode("KEYWORD", "SELECT")); // Already matched
+            node.AddChild(new ParseTreeNode("KEYWORD", "SELECT", Previous().Line, Previous().Column)); 
 
             node.AddChild(ParseSelectList());
 
             Consume("FROM", "Expected 'FROM' clause after SelectList");
-            node.AddChild(new ParseTreeNode("KEYWORD", "FROM"));
+            node.AddChild(new ParseTreeNode("KEYWORD", "FROM", Previous().Line, Previous().Column));
 
             var table = Consume("IDENTIFIER", "Expected table name");
-            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme));
+            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme, table.Line, table.Column));
 
             if (Match("WHERE"))
             {
@@ -357,22 +352,22 @@ namespace SQL_Compiler.Models
             if (Match("ORDER"))
             {
                  var orderNode = new ParseTreeNode("OrderClause");
-                 orderNode.AddChild(new ParseTreeNode("KEYWORD", "ORDER"));
+                 orderNode.AddChild(new ParseTreeNode("KEYWORD", "ORDER", Previous().Line, Previous().Column));
                  Consume("BY", "Expected 'BY' after 'ORDER'");
-                 orderNode.AddChild(new ParseTreeNode("KEYWORD", "BY"));
+                 orderNode.AddChild(new ParseTreeNode("KEYWORD", "BY", Previous().Line, Previous().Column));
                  
                  var col = Consume("IDENTIFIER", "Expected column name in ORDER BY");
-                 orderNode.AddChild(new ParseTreeNode("IDENTIFIER", col.Lexeme));
+                 orderNode.AddChild(new ParseTreeNode("IDENTIFIER", col.Lexeme, col.Line, col.Column));
 
                  if (Match("ASC", "DESC"))
                  {
-                     orderNode.AddChild(new ParseTreeNode("KEYWORD", Previous().Lexeme));
+                     orderNode.AddChild(new ParseTreeNode("KEYWORD", Previous().Lexeme, Previous().Line, Previous().Column));
                  }
                  node.AddChild(orderNode);
             }
 
             Consume("SEMICOLON", "Expected ';' at end of query");
-            node.AddChild(new ParseTreeNode("DELIMITER", ";"));
+            node.AddChild(new ParseTreeNode("DELIMITER", ";", Previous().Line, Previous().Column));
 
             return node;
         }
@@ -382,44 +377,43 @@ namespace SQL_Compiler.Models
             var listNode = new ParseTreeNode("SelectList");
             if (Match("MULTIPLY"))
             {
-                listNode.AddChild(new ParseTreeNode("OPERATOR", "*"));
+                listNode.AddChild(new ParseTreeNode("OPERATOR", "*", Previous().Line, Previous().Column));
                 return listNode;
             }
 
             do
             {
                 var id = Consume("IDENTIFIER", "Expected column name");
-                listNode.AddChild(new ParseTreeNode("IDENTIFIER", id.Lexeme));
-            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",")) != null));
+                listNode.AddChild(new ParseTreeNode("IDENTIFIER", id.Lexeme, id.Line, id.Column));
+            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",", Previous().Line, Previous().Column)) != null));
 
             return listNode;
         }
 
-        // Helper for Insert Statement
         private ParseTreeNode ParseInsertStmt()
         {
             var node = new ParseTreeNode("InsertStmt");
-            node.AddChild(new ParseTreeNode("KEYWORD", "INSERT")); // matched
+            node.AddChild(new ParseTreeNode("KEYWORD", "INSERT", Previous().Line, Previous().Column)); 
 
             Consume("INTO", "Expected 'INTO' after 'INSERT'");
-            node.AddChild(new ParseTreeNode("KEYWORD", "INTO"));
+            node.AddChild(new ParseTreeNode("KEYWORD", "INTO", Previous().Line, Previous().Column));
 
             var table = Consume("IDENTIFIER", "Expected table name");
-            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme));
+            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme, table.Line, table.Column));
 
             Consume("VALUES", "Expected 'VALUES' keyword");
-            node.AddChild(new ParseTreeNode("KEYWORD", "VALUES"));
+            node.AddChild(new ParseTreeNode("KEYWORD", "VALUES", Previous().Line, Previous().Column));
 
             Consume("LEFT_PAREN", "Expected '(' before values");
-            node.AddChild(new ParseTreeNode("DELIMITER", "("));
+            node.AddChild(new ParseTreeNode("DELIMITER", "(", Previous().Line, Previous().Column));
 
             node.AddChild(ParseValueList());
 
             Consume("RIGHT_PAREN", "Expected ')' after values");
-            node.AddChild(new ParseTreeNode("DELIMITER", ")"));
+            node.AddChild(new ParseTreeNode("DELIMITER", ")", Previous().Line, Previous().Column));
 
             Consume("SEMICOLON", "Expected ';' at end");
-            node.AddChild(new ParseTreeNode("DELIMITER", ";"));
+            node.AddChild(new ParseTreeNode("DELIMITER", ";", Previous().Line, Previous().Column));
 
             return node;
         }
@@ -429,22 +423,21 @@ namespace SQL_Compiler.Models
             var listNode = new ParseTreeNode("ValueList");
             do
             {
-               listNode.AddChild(ParseTerm()); // Reuse ParseTerm as it handles literals
-            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",")) != null));
+               listNode.AddChild(ParseTerm()); 
+            } while (Match("COMMA") && (listNode.AddChild(new ParseTreeNode("DELIMITER", ",", Previous().Line, Previous().Column)) != null));
             return listNode;
         }
 
-        // Helper for Update Statement
         private ParseTreeNode ParseUpdateStmt()
         {
             var node = new ParseTreeNode("UpdateStmt");
-            node.AddChild(new ParseTreeNode("KEYWORD", "UPDATE"));
+            node.AddChild(new ParseTreeNode("KEYWORD", "UPDATE", Previous().Line, Previous().Column));
 
             var table = Consume("IDENTIFIER", "Expected table name");
-            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme));
+            node.AddChild(new ParseTreeNode("IDENTIFIER", table.Lexeme, table.Line, table.Column));
 
             Consume("SET", "Expected 'SET' keyword");
-            node.AddChild(new ParseTreeNode("KEYWORD", "SET"));
+            node.AddChild(new ParseTreeNode("KEYWORD", "SET", Previous().Line, Previous().Column));
 
             node.AddChild(ParseAssignList());
 
@@ -454,7 +447,7 @@ namespace SQL_Compiler.Models
             }
 
             Consume("SEMICOLON", "Expected ';' at end");
-            node.AddChild(new ParseTreeNode("DELIMITER", ";"));
+            node.AddChild(new ParseTreeNode("DELIMITER", ";", Previous().Line, Previous().Column));
             return node;
         }
 
@@ -465,10 +458,10 @@ namespace SQL_Compiler.Models
             {
                 var id = Consume("IDENTIFIER", "Expected column name");
                 var assignNode = new ParseTreeNode("Assignment");
-                assignNode.AddChild(new ParseTreeNode("IDENTIFIER", id.Lexeme));
+                assignNode.AddChild(new ParseTreeNode("IDENTIFIER", id.Lexeme, id.Line, id.Column));
 
                 Consume("EQUAL", "Expected '=' in assignment");
-                assignNode.AddChild(new ParseTreeNode("OPERATOR", "="));
+                assignNode.AddChild(new ParseTreeNode("OPERATOR", "=", Previous().Line, Previous().Column));
 
                 assignNode.AddChild(ParseTerm());
                 listNode.AddChild(assignNode);
@@ -478,7 +471,6 @@ namespace SQL_Compiler.Models
             return listNode;
         }
 
-        // Helper for Delete Statement
         private ParseTreeNode ParseDeleteStmt()
         {
              var node = new ParseTreeNode("DeleteStmt");
