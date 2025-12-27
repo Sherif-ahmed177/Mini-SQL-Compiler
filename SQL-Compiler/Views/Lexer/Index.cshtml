@@ -51,6 +51,12 @@
                         <button class="nav-link active border-0 py-3" id="tree-tab" data-bs-toggle="tab" data-bs-target="#tree-pane" type="button">Parse Tree</button>
                     </li>
                     <li class="nav-item">
+                        <button class="nav-link border-0 py-3" id="symbol-tab" data-bs-toggle="tab" data-bs-target="#symbol-pane" type="button">Symbol Table</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link border-0 py-3" id="semantic-tab" data-bs-toggle="tab" data-bs-target="#semantic-pane" type="button">Semantic Errors</button>
+                    </li>
+                    <li class="nav-item">
                         <button class="nav-link border-0 py-3" id="tokens-tab" data-bs-toggle="tab" data-bs-target="#tokens-pane" type="button">Tokens</button>
                     </li>
                 </ul>
@@ -85,7 +91,35 @@
                         </div>
                     </div>
 
-                    <!-- TAB 2: TOKENS -->
+                    <!-- TAB 2: SYMBOL TABLE -->
+                    <div class="tab-pane fade h-100" id="symbol-pane" role="tabpanel">
+                        <div class="h-100 overflow-auto p-3">
+                            <div id="symbolTableEmpty" class="text-center text-muted py-5 mt-5">
+                                <p class="lead">Run analysis to see the symbol table.</p>
+                            </div>
+                            <div id="symbolTableContent" class="d-none">
+                                <h6 class="mb-3">Tables Defined:</h6>
+                                <div id="symbolTableList"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: SEMANTIC ERRORS -->
+                    <div class="tab-pane fade h-100" id="semantic-pane" role="tabpanel">
+                        <div class="h-100 overflow-auto p-3">
+                            <div id="semanticEmpty" class="text-center text-success py-5 mt-5">
+                                <i class="bi bi-check-circle display-1"></i>
+                                <h5 class="mt-3">No Semantic Errors</h5>
+                                <p class="text-muted">All identifiers and types are valid!</p>
+                            </div>
+                            <div id="semanticErrorContent" class="d-none">
+                                <h6 class="text-danger mb-3"><i class="bi bi-exclamation-triangle-fill me-2"></i>Semantic Errors Found:</h6>
+                                <div id="semanticErrorList"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 4: TOKENS -->
                     <div class="tab-pane fade h-100" id="tokens-pane" role="tabpanel">
                         <div class="h-100 overflow-auto p-3">
                             <table class="table table-hover table-bordered table-sm">
@@ -210,10 +244,10 @@
                 const syntaxErrorBox = el('syntaxErrorBox');
                 const syntaxErrorList = el('syntaxErrorList');
                 
-                if(data.errors && data.errors.length > 0) {
-                    // ERRORS EXIST - Show errors prominently, DON'T show tree
-                    syntaxErrorList.innerHTML = data.errors.map(err => 
-                        `<div class="mb-1 p-2 bg-white border border-danger rounded">• ${escapeHtml(err)}</div>`
+                if(data.syntaxErrors && data.syntaxErrors.length > 0) {
+                    // SYNTAX ERRORS EXIST - Show errors prominently, DON'T show tree
+                    syntaxErrorList.innerHTML = data.syntaxErrors.map(err => 
+                        `<div class="mb-1 p-2 bg-white border border-danger rounded">\u2022 ${escapeHtml(err)}</div>`
                     ).join('');
                     syntaxErrorBox.classList.remove('d-none');
                     
@@ -230,33 +264,44 @@
                     
                     // Update Status Bar - ERROR
                     statusBar.className = 'status-bar error';
-                    statusText.innerHTML = `<i class="bi bi-x-circle me-2"></i>Syntax Error Detected (${data.errors.length} error${data.errors.length > 1 ? 's' : ''})`;
+                    statusText.innerHTML = `<i class="bi bi-x-circle me-2"></i>Syntax Error Detected (${data.syntaxErrors.length} error${data.syntaxErrors.length > 1 ? 's' : ''})`;
                     
-                    // Highlight code editor with error
                     inputCode.classList.add('has-error');
+                    showError(`${data.syntaxErrors.length} syntax error(s) found. See Parse Tree tab for details.`);
                     
-                    // Show in left panel
-                    showError(`${data.errors.length} syntax error(s) found. See Parse Tree tab for details.`);
                 } else {
-                    // NO ERRORS - Show tree normally
+                    // NO SYNTAX ERRORS - Show tree (Annotated or Regular)
                     syntaxErrorBox.classList.add('d-none');
                     hideError();
                     
-                    // Update Status Bar - VALID
-                    statusBar.className = 'status-bar valid';
-                    statusText.innerHTML = '<i class="bi bi-check-circle me-2"></i>Valid Syntax';
-                    
-                    // Remove error highlight from code editor
                     inputCode.classList.remove('has-error');
                     
-                    // Render Tree
-                    if(data.tree) {
-                        renderTree(data.tree);
+                    if (data.semanticErrors && data.semanticErrors.length > 0) {
+                        // Semantic Errors exist: Show Warning status, switch to Semantic tab, show Regular Tree
+                        statusBar.className = 'status-bar warning';
+                        statusText.innerHTML = `<i class="bi bi-exclamation-triangle me-2"></i>Semantic Error Detected`;
+                        showError(`${data.semanticErrors.length} semantic error(s) found. Check Semantic Errors tab.`);
+                        
+                        // Switch to Semantic Errors tab automatically
+                        const semanticTab = new bootstrap.Tab(document.getElementById('semantic-tab'));
+                        semanticTab.show();
+                        
+                        // Render REGULAR tree (since annotation is skipped)
+                         renderTree(data.tree);
+                    } else {
+                        // All Good: Show Valid status
+                        statusBar.className = 'status-bar valid';
+                        statusText.innerHTML = '<i class="bi bi-check-circle me-2"></i>Analysis Successful';
+                        
+                        // Render ANNOTATED tree (or regular if null)
+                         renderTree(data.annotatedTree || data.tree);
                     }
                 }
                 
-                // Always render tokens
+                // Always render tokens, symbol table, and semantic errors
                 renderTokens(data.tokens);
+                renderSymbolTable(data.symbolTable || []);
+                renderSemanticErrors(data.semanticErrors || []);
 
             } catch (err) {
                 showError(err.message || "An unexpected error occurred.");
@@ -280,6 +325,67 @@
                 </tr>`;
                 tokenTable.innerHTML += row;
             });
+        }
+
+        function renderSymbolTable(tables) {
+            const symbolTableEmpty = el('symbolTableEmpty');
+            const symbolTableContent = el('symbolTableContent');
+            const symbolTableList = el('symbolTableList');
+            
+            if (tables.length === 0) {
+                symbolTableEmpty.classList.remove('d-none');
+                symbolTableContent.classList.add('d-none');
+            } else {
+                symbolTableEmpty.classList.add('d-none');
+                symbolTableContent.classList.remove('d-none');
+                
+                symbolTableList.innerHTML = tables.map(table => `
+                    <div class="card mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h6 class="mb-0"><i class="bi bi-table me-2"></i>${escapeHtml(table.name)}</h6>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-sm table-bordered mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Column Name</th>
+                                        <th>Data Type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${table.columns.map(col => `
+                                        <tr>
+                                            <td><code>${escapeHtml(col.name)}</code></td>
+                                            <td><span class="badge bg-info">${escapeHtml(col.dataType)}</span></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function renderSemanticErrors(errors) {
+            const semanticEmpty = el('semanticEmpty');
+            const semanticErrorContent = el('semanticErrorContent');
+            const semanticErrorList = el('semanticErrorList');
+            
+            if (errors.length === 0) {
+                semanticEmpty.classList.remove('d-none');
+                semanticErrorContent.classList.add('d-none');
+            } else {
+                semanticEmpty.classList.add('d-none');
+                semanticErrorContent.classList.remove('d-none');
+                
+                semanticErrorList.innerHTML = errors.map((err, idx) => `
+                    <div class="alert alert-danger mb-2 py-2 px-3">
+                        <strong>#${idx + 1}</strong> ${escapeHtml(err.message)}
+                        ${err.line > 0 ? `<span class="text-muted small"> (Line ${err.line}, Column ${err.column})</span>` : ''}
+                    </div>
+                `).join('');
+            }
         }
 
         function renderTree(rootNode) {

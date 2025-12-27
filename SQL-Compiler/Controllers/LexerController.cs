@@ -16,13 +16,18 @@ namespace SQL_Compiler.Controllers
             if (string.IsNullOrWhiteSpace(inputCode))
                 return BadRequest("Please enter SQL-like code.");
 
-            // 1. Lexical Analysis
             var lexer = new Lexer();
             var tokens = lexer.Analyze(inputCode);
 
-            // 2. Syntax Analysis
             var parser = new Parser(tokens);
-            var root = parser.Parse();
+            var parseTree = parser.Parse();
+
+            var semanticAnalyzer = new SemanticAnalyzer(parseTree);
+            semanticAnalyzer.Analyze();
+
+            var symbolTable = semanticAnalyzer.GetSymbolTable();
+            var semanticErrors = semanticAnalyzer.GetErrors();
+            var annotatedTree = semanticAnalyzer.GetAnnotatedTree();
 
             var result = new
             {
@@ -33,8 +38,27 @@ namespace SQL_Compiler.Controllers
                     line = t.Line,
                     column = t.Column
                 }).ToList(),
-                tree = root, // ParseTreeNode is serializable
-                errors = parser.Errors
+                
+                tree = parseTree,
+                syntaxErrors = parser.Errors,
+                
+                symbolTable = symbolTable.GetAllTables().Select(table => new
+                {
+                    name = table.Name,
+                    columns = table.Columns.Select(col => new
+                    {
+                        name = col.Name,
+                        dataType = col.DataType
+                    }).ToList()
+                }).ToList(),
+                semanticErrors = semanticErrors.Select(e => new
+                {
+                    line = e.Line,
+                    column = e.Column,
+                    message = e.Message
+                }).ToList(),
+                annotatedTree = annotatedTree,
+                hasSemanticErrors = semanticAnalyzer.HasErrors()
             };
 
             return Json(result);
