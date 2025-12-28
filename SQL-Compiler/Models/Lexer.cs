@@ -16,7 +16,7 @@ namespace SQL_Compiler.Models
             "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "DROP",
             "ALTER", "ADD", "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
             "AND", "OR", "NOT", "NULL", "ORDER", "BY", "GROUP", "HAVING",
-            "ASC", "DESC", "TRUE", "FALSE"
+            "ASC", "DESC", "TRUE", "FALSE", "LIKE"
         };
 
         private readonly HashSet<string> _types = new(StringComparer.OrdinalIgnoreCase) { "INT", "FLOAT", "TEXT", "VARCHAR", "CHAR", "DATE", "DATETIME", "BOOLEAN", "BIGINT" };
