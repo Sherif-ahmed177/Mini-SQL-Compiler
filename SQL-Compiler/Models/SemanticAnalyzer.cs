@@ -29,10 +29,6 @@ namespace SQL_Compiler.Models
 
             AnalyzeStatements(_parseTree);
 
-            if (_errors.Count == 0)
-            {
-                AnnotateTree(_parseTree);
-            }
         }
 
         public SymbolTable GetSymbolTable() => _symbolTable;
@@ -350,43 +346,6 @@ namespace SQL_Compiler.Models
         }
 
 
-        private void AnnotateTree(ParseTreeNode node)
-        {
-            if (node == null) return;
-
-            switch (node.Name)
-            {
-                case "NUMBER":
-                    node.DataType = InferType(node);
-                    break;
-                case "STRING":
-                    node.DataType = "TEXT";
-                    break;
-                case "IDENTIFIER":
-                    AnnotateIdentifier(node);
-                    break;
-            }
-
-            foreach (var child in node.Children)
-            {
-                AnnotateTree(child);
-            }
-        }
-
-        private void AnnotateIdentifier(ParseTreeNode identifierNode)
-        {
-            foreach (var table in _symbolTable.GetAllTables())
-            {
-                if (table.HasColumn(identifierNode.Lexeme))
-                {
-                    identifierNode.DataType = table.GetColumnType(identifierNode.Lexeme);
-                    identifierNode.SymbolTableRef = $"{table.Name}.{identifierNode.Lexeme}";
-                    break;
-                }
-            }
-        }
-
-
         private ParseTreeNode? GetTableNameFromStatement(ParseTreeNode statementNode)
         {
             return statementNode.Children.FirstOrDefault(c => c.Name == "IDENTIFIER");
@@ -400,6 +359,11 @@ namespace SQL_Compiler.Models
                     return valueNode.Lexeme.Contains('.') ? "FLOAT" : "INT";
                 case "STRING":
                     return "TEXT";
+                case "BOOLEAN_LITERAL":
+                    return "BOOLEAN";
+                case "KEYWORD":
+                    if (valueNode.Lexeme.ToUpper() == "NULL") return "NULL";
+                    return "UNKNOWN";
                 case "IDENTIFIER":
                     return valueNode.DataType ?? "UNKNOWN";
                 default:
@@ -415,6 +379,11 @@ namespace SQL_Compiler.Models
                     return exprNode.Lexeme.Contains('.') ? "FLOAT" : "INT";
                 case "STRING":
                     return "TEXT";
+                case "BOOLEAN_LITERAL":
+                    return "BOOLEAN";
+                case "KEYWORD":
+                    if (exprNode.Lexeme.ToUpper() == "NULL") return "NULL";
+                    return "UNKNOWN";
                 case "IDENTIFIER":
                     return _symbolTable.GetColumnType(tableName, exprNode.Lexeme) ?? "UNKNOWN";
                 default:
@@ -425,6 +394,7 @@ namespace SQL_Compiler.Models
         private bool AreTypesCompatible(string type1, string type2)
         {
             if (type1 == "UNKNOWN" || type2 == "UNKNOWN") return true; 
+            if (type1 == "NULL" || type2 == "NULL") return true;
 
             if (type1.Equals(type2, StringComparison.OrdinalIgnoreCase)) return true;
 

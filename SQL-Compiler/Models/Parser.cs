@@ -8,7 +8,6 @@ namespace SQL_Compiler.Models
         public string Name { get; set; }
         public string Lexeme { get; set; } 
         public string? DataType { get; set; } 
-        public string? SymbolTableRef { get; set; } 
         public int Line { get; set; } = 0;
         public int Column { get; set; } = 0;
         public List<ParseTreeNode> Children { get; set; } = new List<ParseTreeNode>();
@@ -297,6 +296,11 @@ namespace SQL_Compiler.Models
                 return relNode;
             }
             
+            if (left != null && (left.Name == "IDENTIFIER" || left.Name == "NUMBER" || left.Name == "STRING" || (left.Name == "KEYWORD" && left.Lexeme == "NULL")))
+            {
+                SyntaxError($"Expected comparison operator after '{left.Lexeme}'", Peek());
+            }
+
             return left;
         }
 
