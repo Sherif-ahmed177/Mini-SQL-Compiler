@@ -8,6 +8,7 @@ namespace SQL_Compiler.Models
         public string Name { get; set; }
         public string Lexeme { get; set; } 
         public string? DataType { get; set; } 
+        public string? SymbolRef { get; set; } 
         public int Line { get; set; } = 0;
         public int Column { get; set; } = 0;
         public List<ParseTreeNode> Children { get; set; } = new List<ParseTreeNode>();
