@@ -58,22 +58,27 @@ namespace SQL_Compiler.Models
                 var tableNameNode = createNode.Children.FirstOrDefault(c => c.Name == "IDENTIFIER");
                 if (tableNameNode == null)
                 {
-                    AddError(0, 0, "CREATE TABLE missing table name");
+                    var (l0,c0) = BestPos(createNode);
+                    AddError(l0, c0, "CREATE TABLE missing table name");
                     return;
                 }
 
                 string tableName = tableNameNode.Lexeme;
 
+                // annotate table identifier
+                tableNameNode.DataType = "TABLE";
+                tableNameNode.SymbolRef = tableName;
+
                 if (_symbolTable.TableExists(tableName))
                 {
-                    AddError(0, 0, $"Table '{tableName}' already exists");
+                    AddError(tableNameNode.Line, tableNameNode.Column, $"Table '{tableName}' already exists");
                     return;
                 }
 
                 var fieldListNode = createNode.Children.FirstOrDefault(c => c.Name == "FieldList");
                 if (fieldListNode == null)
                 {
-                    AddError(0, 0, $"CREATE TABLE '{tableName}' missing field list");
+                    AddError(tableNameNode.Line, tableNameNode.Column, $"CREATE TABLE '{tableName}' missing field list");
                     return;
                 }
 
@@ -94,6 +99,11 @@ namespace SQL_Compiler.Models
                             continue;
                         }
 
+                         // annotate column definition nodes + add semantic link
+                        columnNameNode.DataType = columnType;
+                        columnNameNode.SymbolRef = $"{tableName}.{columnName}";
+                        columnTypeNode.DataType = "TYPE";
+
                         if (columns.Any(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase)))
                         {
                             AddError(columnNameNode.Line, columnNameNode.Column, $"Duplicate column '{columnName}' in table '{tableName}'");
@@ -111,7 +121,8 @@ namespace SQL_Compiler.Models
             }
             catch (Exception ex)
             {
-                AddError(0, 0, $"Error processing CREATE TABLE: {ex.Message}");
+                var (le, ce) = BestPos(createNode);
+                AddError(le, ce, $"Error processing CREATE TABLE: {ex.Message}");
             }
         }
 
@@ -149,6 +160,10 @@ namespace SQL_Compiler.Models
 
             string tableName = tableNode.Lexeme;
 
+            // annotate table identifier
+            tableNode.DataType = "TABLE";
+            tableNode.SymbolRef = tableName;
+
             if (!_symbolTable.TableExists(tableName))
             {
                 AddError(tableNode.Line, tableNode.Column, $"Table '{tableName}' does not exist");
@@ -183,6 +198,10 @@ namespace SQL_Compiler.Models
             if (tableNode == null) return;
 
             string tableName = tableNode.Lexeme;
+
+            // annotate table identifier
+            tableNode.DataType = "TABLE";
+            tableNode.SymbolRef = tableName;
 
             if (!_symbolTable.TableExists(tableName))
             {
@@ -220,7 +239,10 @@ namespace SQL_Compiler.Models
                     actualType = InferType(valueNode);
                 }
 
-                if (!AreTypesCompatible(expectedType, actualType))
+                
+
+                // annotate value node type
+                valueNode.DataType = actualType;if (!AreTypesCompatible(expectedType, actualType))
                 {
                     if (expectedType == "TEXT" && actualType == "IDENTIFIER")
                     {
@@ -240,6 +262,10 @@ namespace SQL_Compiler.Models
             if (tableNode == null) return;
 
             string tableName = tableNode.Lexeme;
+
+            // annotate table identifier
+            tableNode.DataType = "TABLE";
+            tableNode.SymbolRef = tableName;
 
             if (!_symbolTable.TableExists(tableName))
             {
@@ -263,11 +289,14 @@ namespace SQL_Compiler.Models
                         continue;
                     }
 
-                    var valueNode = assignNode.Children.LastOrDefault(c => c.Name != "IDENTIFIER" && c.Name != "OPERATOR" && c.Name != "DELIMITER");
+                    // semantic link + annotate LHS
+                    LinkIdentifier(columnNode, tableName);
+
+                    var valueNode = assignNode.Children.LastOrDefault(c => c.Name != "OPERATOR" && c.Name != "DELIMITER");
                     if (valueNode != null)
                     {
                         string expectedType = _symbolTable.GetColumnType(tableName, columnName) ?? "UNKNOWN";
-                        string actualType = InferType(valueNode);
+                        string actualType = AnnotateExpression(valueNode, tableName);
 
                         if (!AreTypesCompatible(expectedType, actualType))
                         {
@@ -291,6 +320,10 @@ namespace SQL_Compiler.Models
 
             string tableName = tableNode.Lexeme;
 
+            // annotate table identifier
+            tableNode.DataType = "TABLE";
+            tableNode.SymbolRef = tableName;
+
             if (!_symbolTable.TableExists(tableName))
             {
                 AddError(tableNode.Line, tableNode.Column, $"Table '{tableName}' does not exist");
@@ -313,6 +346,20 @@ namespace SQL_Compiler.Models
         {
             if (node == null) return;
 
+            if (node.Name == "Condition")
+            {
+                // boolean operators result in BOOLEAN
+                if (node.Children.Count >= 2)
+                {
+                    var op0 = node.Children[0];
+                    // NOT condition shape: [OPERATOR NOT, <condition>]
+                    if (op0 != null && op0.Name == "OPERATOR" && op0.Lexeme.Equals("NOT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        node.DataType = "BOOLEAN";
+                    }
+                }
+            }
+
             if (node.Name == "Condition" && node.Children.Count >= 3)
             {
                 var left = node.Children[0];
@@ -321,8 +368,11 @@ namespace SQL_Compiler.Models
 
                 if (op.Name == "OPERATOR" && IsRelationalOperator(op.Lexeme))
                 {
-                    string leftType = GetExpressionType(left, tableName);
-                    string rightType = GetExpressionType(right, tableName);
+                    string leftType = AnnotateExpression(left, tableName);
+                    string rightType = AnnotateExpression(right, tableName);
+
+                    // relational comparisons result in BOOLEAN
+                    node.DataType = "BOOLEAN";
 
                     if (!AreTypesCompatible(leftType, rightType))
                     {
@@ -337,6 +387,10 @@ namespace SQL_Compiler.Models
                 {
                     AddError(node.Line, node.Column, $"Column '{node.Lexeme}' does not exist in table '{tableName}'");
                 }
+                else
+                {
+                    LinkIdentifier(node, tableName);
+                }
             }
 
             foreach (var child in node.Children)
@@ -346,7 +400,55 @@ namespace SQL_Compiler.Models
         }
 
 
-        private ParseTreeNode? GetTableNameFromStatement(ParseTreeNode statementNode)
+        
+        // -------------------------------
+        // Phase 3: Annotation helpers
+        // -------------------------------
+        private void SetNodeType(ParseTreeNode node, string? dataType)
+        {
+            if (node == null) return;
+            node.DataType = dataType;
+        }
+
+        private void LinkIdentifier(ParseTreeNode idNode, string tableName)
+        {
+            if (idNode == null) return;
+            if (idNode.Name != "IDENTIFIER") return;
+
+            var colType = _symbolTable.GetColumnType(tableName, idNode.Lexeme);
+            if (colType != null)
+            {
+                idNode.DataType = colType;
+                idNode.SymbolRef = $"{tableName}.{idNode.Lexeme}";
+            }
+        }
+
+        private (int line, int col) BestPos(ParseTreeNode? node, int fallbackLine = 0, int fallbackCol = 0)
+        {
+            if (node == null) return (fallbackLine, fallbackCol);
+            if (node.Line != 0 || node.Column != 0) return (node.Line, node.Column);
+            var first = node.Children?.FirstOrDefault(c => c != null && (c.Line != 0 || c.Column != 0));
+            if (first != null) return (first.Line, first.Column);
+            return (fallbackLine, fallbackCol);
+        }
+
+        private string AnnotateExpression(ParseTreeNode exprNode, string tableName)
+        {
+            // Infer and write back the datatype (and semantic link for identifiers) directly onto the tree.
+            if (exprNode == null) return "UNKNOWN";
+
+            string t = GetExpressionType(exprNode, tableName);
+            exprNode.DataType = t;
+
+            if (exprNode.Name == "IDENTIFIER")
+            {
+                LinkIdentifier(exprNode, tableName);
+            }
+
+            return t;
+        }
+
+private ParseTreeNode? GetTableNameFromStatement(ParseTreeNode statementNode)
         {
             return statementNode.Children.FirstOrDefault(c => c.Name == "IDENTIFIER");
         }
